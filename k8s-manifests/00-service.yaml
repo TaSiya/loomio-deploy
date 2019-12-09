@@ -1,0 +1,15 @@
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: loomio-client-service 
+  labels:
+    app: loomio-client 
+spec:
+  type: ClusterIP
+  selector:
+    app: loomio-client
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 3000

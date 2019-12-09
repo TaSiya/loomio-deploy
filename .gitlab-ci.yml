@@ -1,0 +1,83 @@
+variables:
+  IMAGE_TAG: gitlab.uber5.com:4567/siya/friends-client:$CI_COMMIT_SHORT_SHA
+  KUBE_DEPLOYMENT_NAME: loomio-client-deployment
+  DB_HOST: postgres
+
+image: ruby:2.4.3
+
+cache:
+  paths:
+    - vendor/bundle
+    - node_modules
+
+services:
+  - docker:18.09-dind
+  - postgres:10.1
+
+before_script:
+  # 
+  - snap install docker
+  - sudo curl -L "https://github.com/docker/compose/releases/download/1.22.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+  - chmod +x /usr/local/bin/docker-compose
+
+stages:
+  - build-app
+  # - build-docker
+  # - deploy
+
+build-app:
+  stage: build-appp
+  script:
+    - ls
+build:
+  stage: build-docker
+  only:
+    - master
+    - k8s-dev
+  script:
+    - docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN gitlab.uber5.com:4567
+    - docker build -t $IMAGE_TAG .
+    - docker push $IMAGE_TAG
+
+deploy_dev:
+  variables:
+    NAMESPACE: loomio-dev
+  stage: deploy
+  only:
+    - k8s-dev
+  script:
+    - apk add curl
+    - curl -LO https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl
+    - chmod +x ./kubectl
+    - mv ./kubectl /usr/local/bin/kubectl
+    - echo $KUBE_CA | base64 -d > kube_ca
+    - kubectl config set-cluster rancher --server=$KUBE_API_SERVER --certificate-authority=kube_ca
+    # Configure kubectl
+    - kubectl config set-credentials gitlab --token="$(echo $KUBE_TOKEN_DEV | base64 -d)"
+    - kubectl config set-context context --cluster=rancher --user=gitlab
+    - kubectl config use-context context
+    # Apply all the manifests
+    - kubectl apply -n $NAMESPACE -f k8s-manifests/00-service.yaml
+    - kubectl apply -n $NAMESPACE -f k8s-manifests/05-configmap-dev.yaml
+    - sed -e "s|{{ image_tag }}|$IMAGE_TAG|" k8s-manifests/10-deployment.yaml | kubectl apply -n $NAMESPACE -f -
+    - timeout 60 kubectl rollout status deployment/$KUBE_DEPLOYMENT_NAME -n $NAMESPACE
+    - timeout 60 kubectl rollout status deployment/dacss-redis-dev-deployment -n $NAMESPACE
+    - kubectl apply -f k8s-manifests/15-ingress-dev.yaml
+    
+deploy_prod:
+  variables:
+    NAMESPACE: dacss-prod
+  stage: deploy
+  only:
+    - master
+  script:
+    # Configure kubectl
+    - kubectl config set-credentials gitlab --token="$(echo $KUBE_TOKEN_PROD | base64 -d)"
+    - kubectl config set-context context --cluster=rancher --user=gitlab
+    - kubectl config use-context context
+    # Apply all the manifests
+    - kubectl apply -n $NAMESPACE -f k8s-manifests/00-service.yaml
+    - sed -e "s|{{ image_tag }}|$IMAGE_TAG|" k8s-manifests/10-deployment.yaml | kubectl apply -n $NAMESPACE -f -
+    - timeout -t 60 kubectl rollout status deployment/$KUBE_DEPLOYMENT_NAME -n $NAMESPACE
+    - kubectl apply -f k8s-manifests/15-ingress-prod.yaml
+  when: manual

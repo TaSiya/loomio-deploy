@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Deployment
+metadata:
+  name: loomio-client-deployment
+  labels:
+    app: loomio-client
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: loomio-client
+  template:
+    metadata:
+      labels:
+        app: loomio-client
+    spec:
+      containers:
+      - name: loomio-client
+        image: "{{ iamge_tag }}"
+        ports:
+          - containerPort: 3000
+        envFrom:
+          - secretRef:
+              name: loomio-dev-environemnt
+          - configMapRef:
+              name: loomio-environment-configmap
+      imagePullSecrets:
+        - name:  gitlab-creds
